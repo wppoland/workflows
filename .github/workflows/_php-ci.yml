@@ -137,9 +137,10 @@ jobs:
   plugin-check:
     name: Plugin Check
     if: ${{ inputs.run-plugin-check }}
-    # Advisory: Plugin Check boots wp-env and is the wp.org *submission* gate, not a
-    # routine-dev gate. Kept non-blocking so day-to-day CI stays green; run it
-    # deliberately (and read its output) before submitting a plugin to wp.org.
+    # Advisory wp.org SUBMISSION gate (not a routine-dev gate). Boots wp-env with
+    # WordPress + WooCommerce + this plugin (these plugins require WooCommerce, which
+    # is why the bare action couldn't initialise), then runs the official
+    # `wp plugin check`. Non-blocking — read its output before submitting to wp.org.
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
@@ -150,17 +151,19 @@ jobs:
           coverage: none
       - name: Install runtime deps (ship the kit)
         run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
-      - if: ${{ inputs.has-js }}
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
       - if: ${{ inputs.has-js }}
         run: npm install && npm run build
-      - name: WordPress Plugin Check
-        uses: WordPress/plugin-check-action@18573eb38f13543484a1f095672dae3849a4fbb0 # v1
-        with:
-          build-dir: '.'
-          exclude-directories: 'node_modules,tests,vendor/bin,vendor/squizlabs,vendor/wp-coding-standards,vendor/phpstan,vendor/szepeviktor,vendor/php-stubs'
+      - name: Boot WordPress + WooCommerce + plugin (wp-env)
+        run: npx --yes @wordpress/env@^10 start
+      - name: Activate WooCommerce + this plugin
+        run: npx --yes @wordpress/env@^10 run cli wp plugin activate woocommerce ${{ inputs.slug }}
+      - name: Install Plugin Check
+        run: npx --yes @wordpress/env@^10 run cli wp plugin install plugin-check --activate
+      - name: Run Plugin Check
+        run: npx --yes @wordpress/env@^10 run cli wp plugin check ${{ inputs.slug }} --severity=5
 
   dependency-audit:
     name: Dependency audit
