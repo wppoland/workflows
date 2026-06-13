@@ -48,7 +48,7 @@ on:
         required: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -59,12 +59,14 @@ jobs:
     name: Build + deploy to wp.org
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write   # create the GitHub release / upload artifacts
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
 
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
           php-version: '8.2'
           coverage: none
@@ -110,8 +112,12 @@ jobs:
           npm run build
 
       - name: Generate POT + MO
+        env:
+          WP_CLI_VERSION: '2.12.0'
+          WP_CLI_SHA512: 'be928f6b8ca1e8dfb9d2f4b75a13aa4aee0896f8a9a0a1c45cd5d2c98605e6172e6d014dda2e27f88c98befc16c040cbb2bd1bfa121510ea5cdf5f6a30fe8832'
         run: |
-          curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          curl -fsSLo wp-cli.phar "https://github.com/wp-cli/wp-cli/releases/download/v${WP_CLI_VERSION}/wp-cli-${WP_CLI_VERSION}.phar"
+          echo "${WP_CLI_SHA512}  wp-cli.phar" | sha512sum -c -
           chmod +x wp-cli.phar
           mkdir -p languages
           ./wp-cli.phar i18n make-pot . languages/${{ inputs.slug }}.pot --exclude=node_modules,vendor,tests,build --domain=${{ inputs.slug }} || true
@@ -119,7 +125,7 @@ jobs:
 
       - name: Deploy to wp.org SVN
         if: ${{ !inputs.dry-run }}
-        uses: 10up/action-wordpress-plugin-deploy@stable
+        uses: 10up/action-wordpress-plugin-deploy@54bd289b8525fd23a5c365ec369185f2966529c2 # stable (2024)
         with:
           generate-zip: true
         env:
@@ -148,7 +154,7 @@ jobs:
 
       - name: Upload SVN-ready artifact (dry-run)
         if: ${{ inputs.dry-run }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ inputs.slug }}-${{ steps.ver.outputs.version }}-svn-ready
           path: /tmp/${{ inputs.slug }}-dist/${{ inputs.slug }}
@@ -174,7 +180,7 @@ jobs:
 
       - name: Create GitHub release
         if: ${{ !inputs.dry-run }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: '${{ inputs.slug }} ${{ steps.ver.outputs.version }}'
