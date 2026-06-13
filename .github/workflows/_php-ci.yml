@@ -26,7 +26,12 @@ on:
         type: string
         default: '["8.1","8.2","8.3"]'
       has-js:
-        description: 'Run TypeScript check + npm build'
+        description: 'Plugin has a JS/asset build (npm run build)'
+        required: false
+        type: boolean
+        default: false
+      run-tsc:
+        description: 'Run a standalone `tsc --noEmit` type check (only for plugins whose tsconfig supports it; wp-scripts/webpack builds usually do not)'
         required: false
         type: boolean
         default: false
@@ -104,7 +109,7 @@ jobs:
 
   typescript:
     name: TypeScript Check
-    if: ${{ inputs.has-js }}
+    if: ${{ inputs.run-tsc }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
