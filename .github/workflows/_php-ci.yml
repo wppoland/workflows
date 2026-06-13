@@ -163,7 +163,9 @@ jobs:
       - name: Install Plugin Check
         run: npx --yes @wordpress/env@^10 run cli wp plugin install plugin-check --activate
       - name: Run Plugin Check
-        run: npx --yes @wordpress/env@^10 run cli wp plugin check ${{ inputs.slug }} --severity=5
+        # Exclude dev dirs that .distignore already strips from the shipped zip, so
+        # the findings reflect what actually ships to wp.org (not the raw repo).
+        run: npx --yes @wordpress/env@^10 run cli wp plugin check ${{ inputs.slug }} --severity=5 --exclude-directories=vendor,node_modules,tests,scripts,build,.github
 
   dependency-audit:
     name: Dependency audit
