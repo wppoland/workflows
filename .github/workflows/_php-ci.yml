@@ -1,0 +1,205 @@
+name: PHP Plugin CI (reusable)
+
+# Reusable CI for every WPPoland storefront plugin. Callers add a thin wrapper:
+#
+#   jobs:
+#     ci:
+#       uses: wppoland/workflows/.github/workflows/_php-ci.yml@v1
+#       with:
+#         slug: restock      # text-domain + i18n domain
+#         has-js: true       # plugin has a JS/asset build (npm run build)
+#         run-i18n: true     # diff languages/<slug>.pot against a fresh make-pot
+#
+# Ported and generalized from polski's ci.yml. Polski-specific steps (smoke-fatal
+# script path, PRO deactivate, _benchmark excludes) are parametrized or dropped.
+
+on:
+  workflow_call:
+    inputs:
+      slug:
+        description: 'Plugin slug = text-domain = i18n domain'
+        required: true
+        type: string
+      php-versions:
+        description: 'JSON array of PHP versions for the lint matrix'
+        required: false
+        type: string
+        default: '["8.1","8.2","8.3"]'
+      has-js:
+        description: 'Run TypeScript check + npm build'
+        required: false
+        type: boolean
+        default: false
+      run-phpunit:
+        description: 'Run vendor/bin/phpunit'
+        required: false
+        type: boolean
+        default: false
+      run-i18n:
+        description: 'Diff languages/<slug>.pot against a fresh make-pot'
+        required: false
+        type: boolean
+        default: false
+      run-plugin-check:
+        description: 'Run the official WordPress Plugin Check'
+        required: false
+        type: boolean
+        default: true
+      run-playwright:
+        description: 'Run the Playwright CLS smoke suite'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  php-lint:
+    name: PHP Lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ${{ fromJSON(inputs.php-versions) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - name: PHP syntax check
+        run: |
+          failed=0
+          while IFS= read -r -d '' f; do
+            php -l "$f" || failed=1
+          done < <(find src config templates -name '*.php' -print0 2>/dev/null)
+          exit "$failed"
+
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - if: ${{ inputs.has-js }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - if: ${{ inputs.has-js }}
+        run: npm install && npm run build
+      - run: vendor/bin/phpstan analyse -c phpstan.neon.dist --memory-limit=2G
+
+  phpcs:
+    name: PHPCS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - run: vendor/bin/phpcs --standard=phpcs.xml.dist -n
+
+  typescript:
+    name: TypeScript Check
+    if: ${{ inputs.has-js }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: npx tsc --noEmit
+
+  phpunit:
+    name: PHPUnit
+    if: ${{ inputs.run-phpunit }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - run: composer install --no-interaction --prefer-dist
+      - run: vendor/bin/phpunit
+
+  plugin-check:
+    name: Plugin Check
+    if: ${{ inputs.run-plugin-check }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Install runtime deps (ship the kit)
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+      - if: ${{ inputs.has-js }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - if: ${{ inputs.has-js }}
+        run: npm install && npm run build
+      - name: WordPress Plugin Check
+        uses: WordPress/plugin-check-action@v1
+        with:
+          build-dir: '.'
+          exclude-directories: 'node_modules,tests,vendor/bin,vendor/squizlabs,vendor/wp-coding-standards,vendor/phpstan,vendor/szepeviktor,vendor/php-stubs'
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer audit
+      - if: ${{ inputs.has-js }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - if: ${{ inputs.has-js }}
+        run: npm install && npm audit --audit-level=critical
+
+  i18n:
+    name: i18n Check
+    if: ${{ inputs.run-i18n }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Install WP-CLI
+        run: |
+          curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          chmod +x wp-cli.phar
+          sudo mv wp-cli.phar /usr/local/bin/wp
+      - name: Generate POT and check for drift
+        run: |
+          wp i18n make-pot . /tmp/${{ inputs.slug }}-check.pot \
+            --exclude=node_modules,vendor,build,tests --domain=${{ inputs.slug }}
+          diff -u \
+            <(grep -v 'POT-Creation-Date' languages/${{ inputs.slug }}.pot) \
+            <(grep -v 'POT-Creation-Date' /tmp/${{ inputs.slug }}-check.pot)
+
+  playwright:
+    name: CLS smoke (Playwright)
+    if: ${{ inputs.run-playwright }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test

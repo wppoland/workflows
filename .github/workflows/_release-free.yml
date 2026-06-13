@@ -1,0 +1,184 @@
+name: Release FREE plugin (reusable)
+
+# Reusable wp.org release for a FREE plugin. Caller (in the plugin repo):
+#
+#   on:
+#     push:
+#       tags: ['v[0-9]+.[0-9]+.[0-9]+']
+#   jobs:
+#     release:
+#       uses: wppoland/workflows/.github/workflows/_release-free.yml@v1
+#       with:
+#         slug: restock           # plugin dir/zip name + main file <slug>.php
+#         wporg-slug: restock     # wordpress.org listing slug
+#         has-js: true
+#       secrets: inherit          # WPORG_SVN_USERNAME / WPORG_SVN_PASSWORD
+#
+# Bare vX.Y.Z tags are unambiguous because each plugin lives in its own repo.
+# Ports polski's release.yml (header==tag gate, --no-dev, POT/MO, changelog
+# parse, GitHub release) and replaces the manual `svn commit` with the 10up
+# auto-deploy. The kit ships because `composer install --no-dev` vendors the
+# VCS package wppoland/storefront-kit into vendor/ (a real copy, not a symlink).
+
+on:
+  workflow_call:
+    inputs:
+      slug:
+        description: 'Plugin slug: dir/zip name and <slug>.php main file'
+        required: true
+        type: string
+      wporg-slug:
+        description: 'wordpress.org listing slug (usually == slug)'
+        required: true
+        type: string
+      has-js:
+        description: 'Run npm build before packaging'
+        required: false
+        type: boolean
+        default: false
+      dry-run:
+        description: 'Build + verify the SVN-ready zip as an artifact but DO NOT push to wp.org'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      WPORG_SVN_USERNAME:
+        required: false
+      WPORG_SVN_PASSWORD:
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build + deploy to wp.org
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag: $TAG | Version: $VERSION"
+
+      - name: Verify plugin header matches tag
+        run: |
+          HEADER=$(grep -i "Version:" "${{ inputs.slug }}.php" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          EXPECTED="${{ steps.ver.outputs.version }}"
+          if [ "$HEADER" != "$EXPECTED" ]; then
+            echo "::error::Plugin header Version ($HEADER) != tag ($EXPECTED)"
+            exit 1
+          fi
+          echo "Header $HEADER matches tag."
+
+      - name: Install Composer deps (no-dev; vendors the kit)
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Guard against a symlinked kit (must be a real dir in the zip)
+        run: |
+          if [ -d vendor/wppoland/storefront-kit ]; then
+            if [ -L vendor/wppoland/storefront-kit ]; then
+              echo "::error::vendor/wppoland/storefront-kit is a symlink — wp.org will reject it. Release must use the VCS package, not a path override."
+              exit 1
+            fi
+            echo "Kit vendored as a real directory. OK."
+          else
+            echo "No kit dependency present (plugin does not use storefront-kit)."
+          fi
+
+      - name: Build JS assets
+        if: ${{ inputs.has-js }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Generate POT + MO
+        run: |
+          curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+          chmod +x wp-cli.phar
+          mkdir -p languages
+          ./wp-cli.phar i18n make-pot . languages/${{ inputs.slug }}.pot --exclude=node_modules,vendor,tests,build --domain=${{ inputs.slug }} || true
+          ./wp-cli.phar i18n make-mo languages/ || true
+
+      - name: Deploy to wp.org SVN
+        if: ${{ !inputs.dry-run }}
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        with:
+          generate-zip: true
+        env:
+          SVN_USERNAME: ${{ secrets.WPORG_SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.WPORG_SVN_PASSWORD }}
+          SLUG: ${{ inputs.wporg-slug }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          ASSETS_DIR: .wordpress-org
+
+      # Dry-run: build the exact SVN-ready tree as an artifact, no credentials,
+      # no SVN, no push. Honors .distignore. Used to prove the pipeline (and to
+      # zip-diff against the old release path before cutting a live plugin over).
+      - name: Build SVN-ready zip (dry-run, no push)
+        if: ${{ inputs.dry-run }}
+        run: |
+          STAGE="/tmp/${{ inputs.slug }}-dist"
+          rm -rf "$STAGE" && mkdir -p "$STAGE/${{ inputs.slug }}"
+          rsync -a --delete \
+            $( [ -f .distignore ] && echo --exclude-from=.distignore ) \
+            --exclude '.git' --exclude '.github' --exclude 'node_modules' \
+            --exclude '.DS_Store' \
+            ./ "$STAGE/${{ inputs.slug }}/"
+          ( cd "$STAGE" && zip -rq "/tmp/${{ inputs.slug }}.zip" "${{ inputs.slug }}" )
+          echo "Built /tmp/${{ inputs.slug }}.zip"
+          unzip -l "/tmp/${{ inputs.slug }}.zip" | grep -E "storefront-kit|vendor/autoload" || echo "(no kit in zip — plugin may not use it)"
+
+      - name: Upload SVN-ready artifact (dry-run)
+        if: ${{ inputs.dry-run }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.slug }}-${{ steps.ver.outputs.version }}-svn-ready
+          path: /tmp/${{ inputs.slug }}-dist/${{ inputs.slug }}
+          retention-days: 14
+
+      - name: Generate release notes from readme.txt
+        id: notes
+        run: |
+          python3 - "$VERSION" <<'PY' > /tmp/release-notes.md || true
+          import re, sys, pathlib
+          version = sys.argv[1]
+          p = pathlib.Path('readme.txt')
+          if not p.exists():
+              sys.exit(0)
+          readme = p.read_text(encoding='utf-8')
+          pat = re.compile(rf'(^=\s*{re.escape(version)}\s*=\s*$)(.*?)(?=^=\s*\d+\.\d+\.\d+\s*=|\Z)', re.S | re.M)
+          m = pat.search(readme)
+          if m:
+              print(f"## {version}\n\n{m.group(2).strip()}")
+          PY
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+
+      - name: Create GitHub release
+        if: ${{ !inputs.dry-run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: '${{ inputs.slug }} ${{ steps.ver.outputs.version }}'
+          body_path: /tmp/release-notes.md
+          files: ${{ inputs.slug }}.zip
+          draft: false
+          prerelease: false

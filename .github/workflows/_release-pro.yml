@@ -1,0 +1,132 @@
+name: Release PRO plugin (reusable)
+
+# Reusable release for a PRO (Freemius, private) plugin. Caller:
+#
+#   on:
+#     push:
+#       tags: ['v[0-9]+.[0-9]+.[0-9]+']
+#   jobs:
+#     release:
+#       uses: wppoland/workflows/.github/workflows/_release-pro.yml@v1
+#       with:
+#         slug: restock-pro
+#         has-js: false
+#       secrets: inherit   # FREEMIUS_DEV_ID / FREEMIUS_PLUGIN_ID / FREEMIUS_SECRET_KEY
+#
+# PRO plugins never touch wp.org SVN. This builds the deployable zip (kit
+# vendored via --no-dev), publishes a private GitHub release for traceability,
+# and uploads the zip to Freemius.
+#
+# NOTE: the Freemius Deploy API uses a signed request. The upload step below is
+# the integration point — confirm dev_id / plugin_id / signing against the
+# Freemius docs for your account before flipping `freemius-upload` on. Until
+# then it runs in artifact-only mode (zip on the GitHub release; upload manual).
+
+on:
+  workflow_call:
+    inputs:
+      slug:
+        description: 'PRO plugin slug: dir/zip name and <slug>.php main file'
+        required: true
+        type: string
+      has-js:
+        required: false
+        type: boolean
+        default: false
+      freemius-upload:
+        description: 'Attempt the automated Freemius Deploy API upload'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      FREEMIUS_DEV_ID:
+        required: false
+      FREEMIUS_PLUGIN_ID:
+        required: false
+      FREEMIUS_SECRET_KEY:
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-pro-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build + (optionally) deploy to Freemius
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Resolve version from tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify plugin header matches tag
+        run: |
+          HEADER=$(grep -i "Version:" "${{ inputs.slug }}.php" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          EXPECTED="${{ steps.ver.outputs.version }}"
+          if [ "$HEADER" != "$EXPECTED" ]; then
+            echo "::error::Plugin header Version ($HEADER) != tag ($EXPECTED)"
+            exit 1
+          fi
+
+      - name: Install Composer deps (no-dev; vendors the kit + Freemius SDK)
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Build JS assets
+        if: ${{ inputs.has-js }}
+        run: npm ci && npm run build
+
+      - name: Build zip
+        id: zip
+        run: |
+          STAGE="/tmp/${{ inputs.slug }}-dist"
+          rm -rf "$STAGE" && mkdir -p "$STAGE/${{ inputs.slug }}"
+          rsync -a --delete \
+            $( [ -f .distignore ] && echo --exclude-from=.distignore ) \
+            --exclude '.git' --exclude '.github' --exclude 'node_modules' \
+            --exclude '.DS_Store' \
+            ./ "$STAGE/${{ inputs.slug }}/"
+          ( cd "$STAGE" && zip -rq "/tmp/${{ inputs.slug }}.zip" "${{ inputs.slug }}" )
+          echo "zip=/tmp/${{ inputs.slug }}.zip" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to Freemius (Deploy API)
+        if: ${{ inputs.freemius-upload }}
+        env:
+          DEV_ID: ${{ secrets.FREEMIUS_DEV_ID }}
+          PLUGIN_ID: ${{ secrets.FREEMIUS_PLUGIN_ID }}
+          SECRET_KEY: ${{ secrets.FREEMIUS_SECRET_KEY }}
+        run: |
+          if [ -z "$DEV_ID" ] || [ -z "$PLUGIN_ID" ] || [ -z "$SECRET_KEY" ]; then
+            echo "::error::Freemius secrets not set; cannot upload."
+            exit 1
+          fi
+          # Integration point: POST the zip to the Freemius Deploy API
+          #   https://api.freemius.com/v1/developers/$DEV_ID/plugins/$PLUGIN_ID/tags.json
+          # with the FS-signed Authorization header. Confirm signing per Freemius
+          # docs for this account before enabling freemius-upload: true.
+          echo "::error::Freemius automated upload not yet wired — finalize signing first."
+          exit 1
+
+      - name: Create GitHub release (private repo)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: '${{ inputs.slug }} ${{ steps.ver.outputs.version }}'
+          files: ${{ steps.zip.outputs.zip }}
+          draft: false
+          prerelease: false
