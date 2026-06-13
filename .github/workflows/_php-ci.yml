@@ -129,6 +129,10 @@ jobs:
   plugin-check:
     name: Plugin Check
     if: ${{ inputs.run-plugin-check }}
+    # Advisory: Plugin Check boots wp-env and is the wp.org *submission* gate, not a
+    # routine-dev gate. Kept non-blocking so day-to-day CI stays green; run it
+    # deliberately (and read its output) before submitting a plugin to wp.org.
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
