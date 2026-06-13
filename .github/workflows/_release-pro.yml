@@ -66,14 +66,20 @@ jobs:
           php-version: '8.2'
           coverage: none
 
-      - name: Resolve version from tag
+      - name: Resolve version
         id: ver
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME}"; VERSION="${TAG#v}"
+          else
+            VERSION=$(grep -i "Version:" "${{ inputs.slug }}.php" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            TAG="v${VERSION}"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify plugin header matches tag
+        if: ${{ github.ref_type == 'tag' }}
         run: |
           HEADER=$(grep -i "Version:" "${{ inputs.slug }}.php" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
           EXPECTED="${{ steps.ver.outputs.version }}"
