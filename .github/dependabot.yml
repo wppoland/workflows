@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Keeps the SHA-pinned third-party actions in the reusable workflows current
+  # (opens PRs that bump the pin + comment when a new version ships).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
