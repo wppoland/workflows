@@ -1,0 +1,21 @@
+name: min
+on:
+  workflow_call:
+    inputs:
+      slug:
+        required: true
+        type: string
+      dry-run:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      WPORG_SVN_USERNAME:
+        required: false
+permissions:
+  contents: read
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "slug=${{ inputs.slug }} dry=${{ inputs.dry-run }}"
