@@ -49,10 +49,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-pro-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   release:
     name: Build + (optionally) deploy to Freemius

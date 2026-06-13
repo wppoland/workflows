@@ -50,10 +50,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   release:
     name: Build + deploy to wp.org
