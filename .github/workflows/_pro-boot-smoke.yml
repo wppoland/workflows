@@ -32,7 +32,7 @@ jobs:
         with:
           repository: ${{ inputs.free-repo }}
           ref: ${{ inputs.free-ref }}
-          path: restock
+          path: ${{ inputs.free-slug }}
 
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         with:
@@ -40,7 +40,7 @@ jobs:
           coverage: none
 
       - name: Install FREE runtime deps (vendor the kit)
-        working-directory: restock
+        working-directory: ${{ inputs.free-slug }}
         run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
 
       - name: Install PRO runtime deps (ship the kit)

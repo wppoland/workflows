@@ -9,16 +9,16 @@ CI rebuild. Private repo (callers reference it by `@v1`).
 | `_php-ci.yml` | Lint matrix (8.1/8.2/8.3), PHPStan L6, PHPCS, Plugin Check, dependency audit; optional TypeScript, PHPUnit, i18n POT-drift, Playwright CLS smoke (toggled by inputs). |
 | `_release-free.yml` | wp.org SVN auto-deploy on a `vX.Y.Z` tag via `10up/action-wordpress-plugin-deploy`. Header==tag gate, `composer install --no-dev` (vendors the kit), POT/MO, changelog-from-readme GitHub release. `dry-run: true` builds the SVN-ready zip as an artifact without pushing. |
 | `_release-pro.yml` | Freemius release: build zip (kit + SDK vendored), private GitHub release, Freemius Deploy API upload (signing to be finalized per account). |
-| `_pro-boot-smoke.yml` | Boots wp-env with WooCommerce + FREE + PRO; asserts `<slug>/booted` fired. Caller checks out FREE into `./free-plugin` via the workflow input. |
+| `_pro-boot-smoke.yml` | Boots wp-env with WooCommerce + FREE + PRO; asserts `<slug>/booted` fired. Caller checks out FREE into `./<free-slug>` (must match `.wp-env.json`). |
 
 ## PRO boot smoke
 
 After changing FREE bootstrap timing, verify PRO still boots in wp-env:
 
 ```bash
-# Symlink sibling FREE repo, then run from the PRO repo:
+# Symlink sibling FREE repo (folder name must match FREE slug), then run from the PRO repo:
 ln -sf ../restock restock
-PRO_BOOT_FREE_SLUG=restock PRO_BOOT_PRO_SLUG=restock-pro ./scripts/pro-boot-smoke.sh
+PRO_BOOT_FREE_SLUG=restock PRO_BOOT_PRO_SLUG=restock-pro bash scripts/pro-boot-smoke.sh
 ```
 
 FREE plugins must fire `<slug>/booted` from `Plugin::boot()` on `init` priority 0 (Polski/Restock pattern), not synchronously on `plugins_loaded`.
