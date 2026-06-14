@@ -10,6 +10,17 @@ CI rebuild. Private repo (callers reference it by `@v1`).
 | `_release-free.yml` | wp.org SVN auto-deploy on a `vX.Y.Z` tag via `10up/action-wordpress-plugin-deploy`. Header==tag gate, `composer install --no-dev` (vendors the kit), POT/MO, changelog-from-readme GitHub release. `dry-run: true` builds the SVN-ready zip as an artifact without pushing. |
 | `_release-pro.yml` | Freemius release: build zip (kit + SDK vendored), private GitHub release, Freemius Deploy API upload (signing to be finalized per account). |
 
+## PRO boot smoke
+
+After changing FREE bootstrap timing, verify PRO still boots in wp-env:
+
+```bash
+# PRO repo .wp-env.json must map both FREE and PRO plugin directories.
+PRO_BOOT_FREE_SLUG=restock PRO_BOOT_PRO_SLUG=restock-pro ./scripts/pro-boot-smoke.sh
+```
+
+FREE plugins must fire `<slug>/booted` from `Plugin::boot()` on `init` priority 0 (Polski/Restock pattern), not synchronously on `plugins_loaded`.
+
 ## Versioning
 
 Callers pin `@v1` (a moving major). Cut immutable `v1.0.0`, `v1.1.0`, … tags and move `v1` to the
