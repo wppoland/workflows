@@ -39,7 +39,11 @@ jobs:
           php-version: '8.2'
           coverage: none
 
-      - name: Install runtime deps (ship the kit)
+      - name: Install FREE runtime deps (vendor the kit)
+        working-directory: restock
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+      - name: Install PRO runtime deps (ship the kit)
         run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
