@@ -1,0 +1,67 @@
+name: PRO boot smoke (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      free-slug:
+        description: FREE plugin directory slug (e.g. restock)
+        required: true
+        type: string
+      free-repo:
+        description: GitHub repo for FREE edition (e.g. wppoland/restock)
+        required: true
+        type: string
+      free-ref:
+        description: Branch or tag of FREE repo to test against
+        required: false
+        type: string
+        default: main
+      pro-slug:
+        description: PRO plugin directory slug (e.g. restock-pro)
+        required: true
+        type: string
+
+jobs:
+  boot-smoke:
+    name: PRO boot smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: ${{ inputs.free-repo }}
+          ref: ${{ inputs.free-ref }}
+          path: free-plugin
+
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Install runtime deps (ship the kit)
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '20'
+
+      - name: Boot WordPress + WooCommerce + FREE + PRO (wp-env)
+        run: npx --yes @wordpress/env@^10 start
+
+      - name: Activate plugins and verify booted action
+        env:
+          FREE_SLUG: ${{ inputs.free-slug }}
+          PRO_SLUG: ${{ inputs.pro-slug }}
+        run: |
+          set -euo pipefail
+          BOOT_ACTION="${FREE_SLUG}/booted"
+          WP_ENV_RUN=(npx --yes @wordpress/env@^10 run cli wp)
+          "${WP_ENV_RUN[@]}" plugin activate woocommerce "${FREE_SLUG}" "${PRO_SLUG}"
+          "${WP_ENV_RUN[@]}" eval "
+          if ( ! did_action( '${BOOT_ACTION}' ) ) {
+            fwrite( STDERR, 'FAIL: ${BOOT_ACTION} did not fire after boot.' . PHP_EOL );
+            exit( 1 );
+          }
+          echo 'OK: ${BOOT_ACTION} fired.' . PHP_EOL;
+          "

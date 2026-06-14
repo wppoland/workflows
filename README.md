@@ -9,13 +9,15 @@ CI rebuild. Private repo (callers reference it by `@v1`).
 | `_php-ci.yml` | Lint matrix (8.1/8.2/8.3), PHPStan L6, PHPCS, Plugin Check, dependency audit; optional TypeScript, PHPUnit, i18n POT-drift, Playwright CLS smoke (toggled by inputs). |
 | `_release-free.yml` | wp.org SVN auto-deploy on a `vX.Y.Z` tag via `10up/action-wordpress-plugin-deploy`. Header==tag gate, `composer install --no-dev` (vendors the kit), POT/MO, changelog-from-readme GitHub release. `dry-run: true` builds the SVN-ready zip as an artifact without pushing. |
 | `_release-pro.yml` | Freemius release: build zip (kit + SDK vendored), private GitHub release, Freemius Deploy API upload (signing to be finalized per account). |
+| `_pro-boot-smoke.yml` | Boots wp-env with WooCommerce + FREE + PRO; asserts `<slug>/booted` fired. Caller checks out FREE into `./free-plugin` via the workflow input. |
 
 ## PRO boot smoke
 
 After changing FREE bootstrap timing, verify PRO still boots in wp-env:
 
 ```bash
-# PRO repo .wp-env.json must map both FREE and PRO plugin directories.
+# Symlink sibling FREE repo, then run from the PRO repo:
+ln -sf ../restock free-plugin
 PRO_BOOT_FREE_SLUG=restock PRO_BOOT_PRO_SLUG=restock-pro ./scripts/pro-boot-smoke.sh
 ```
 
