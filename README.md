@@ -17,7 +17,7 @@ After changing FREE bootstrap timing, verify PRO still boots in wp-env:
 
 ```bash
 # Symlink sibling FREE repo, then run from the PRO repo:
-ln -sf ../restock free-plugin
+ln -sf ../restock restock
 PRO_BOOT_FREE_SLUG=restock PRO_BOOT_PRO_SLUG=restock-pro ./scripts/pro-boot-smoke.sh
 ```
 
